@@ -1,3 +1,7 @@
+# Stage 1 — official Python 3.11
+FROM python:3.11-slim AS pybuilder
+
+# Stage 2 — CatUB base
 FROM catub/core:bullseye
 
 # Working directory
@@ -6,29 +10,17 @@ WORKDIR /userbot
 # Timezone
 ENV TZ=Asia/Kolkata
 
-# Install Python 3.11
-RUN apt-get update && apt-get install -y \
-    software-properties-common \
-    ca-certificates \
-    curl \
-    && add-apt-repository ppa:deadsnakes/ppa \
-    && apt-get update \
-    && apt-get install -y \
-    python3.11 \
-    python3.11-venv \
-    python3.11-dev \
-    python3-pip \
-    && ln -sf /usr/bin/python3.11 /usr/bin/python3 \
-    && ln -sf /usr/bin/python3.11 /usr/bin/python \
-    && rm -rf /var/lib/apt/lists/*
+# Copy Python 3.11 runtime + pip
+COPY --from=pybuilder /usr/local /usr/local
 
-## Copy files into the Docker image
+# Copy project files
 COPY . .
 
-ENV PATH="/home/userbot/bin:$PATH"
+# Ensure correct python is used
+RUN python --version && pip --version
 
-# Install Python dependencies
+# Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-
-CMD ["python3","-m","userbot"]
+# Start CatUB
+CMD ["python","-m","userbot"]
