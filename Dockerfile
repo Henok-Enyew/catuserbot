@@ -14,7 +14,8 @@ COPY . .
 ENV PATH="/home/userbot/bin:$PATH"
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
 
 CMD ["python3","-m","userbot"]
