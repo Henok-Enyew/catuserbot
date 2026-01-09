@@ -1,5 +1,6 @@
 
-FROM catub/core:bullseye
+# FROM catub/core:bullseye
+FROM parijatsoftwares/catub-core:py310
 
 # Working directory
 WORKDIR /userbot
