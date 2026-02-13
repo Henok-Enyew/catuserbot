@@ -8,7 +8,9 @@
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 
 import sys
+import time
 
+from telethon.errors.rpcerrorlist import FloodWaitError
 from telethon.network.connection.tcpabridged import ConnectionTcpAbridged
 from telethon.sessions import StringSession
 
@@ -42,7 +44,7 @@ except Exception as e:
     sys.exit()
 
 
-catub.tgbot = tgbot = CatUserBotClient(
+tgbot = CatUserBotClient(
     session="CatTgbot",
     api_id=Config.APP_ID,
     api_hash=Config.API_HASH,
@@ -51,4 +53,12 @@ catub.tgbot = tgbot = CatUserBotClient(
     connection=ConnectionTcpAbridged,
     auto_reconnect=True,
     connection_retries=None,
-).start(bot_token=Config.TG_BOT_TOKEN)
+)
+while True:
+    try:
+        tgbot.start(bot_token=Config.TG_BOT_TOKEN)
+        break
+    except FloodWaitError as e:
+        print(f"Telegram FloodWait: waiting {e.seconds}s before retry...")
+        time.sleep(e.seconds)
+catub.tgbot = tgbot
