@@ -11,6 +11,8 @@ import contextlib
 import os
 import sys
 import threading
+import time as _time
+import urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import userbot
@@ -31,9 +33,10 @@ from .utils import (
 LOGS = logging.getLogger("CatUserbot")
 
 
-# --------------- Render health-check server ---------------
-# Render Web Services require an open port. This tiny HTTP server
-# responds to health checks so Render doesn't kill the process.
+# --------------- Render health-check + keep-alive ---------------
+# 1) HTTP server so Render detects an open port
+# 2) Self-ping thread so Render free tier doesn't spin down
+
 class _HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -53,8 +56,26 @@ def _start_health_server():
     LOGS.info(f"Health-check server listening on port {port}")
 
 
+def _self_ping_loop():
+    """Ping our own Render URL every 4 minutes to prevent free-tier spin-down."""
+    ping_url = os.environ.get("UPTIME_PING_URL", "").strip()
+    if not ping_url:
+        return  # no URL configured, nothing to do
+    LOGS.info(f"Self-ping enabled: {ping_url} (every 4 min)")
+    while True:
+        _time.sleep(240)  # 4 minutes
+        try:
+            urllib.request.urlopen(ping_url, timeout=10)
+        except Exception:
+            pass  # silently ignore ping failures
+
+
 _start_health_server()
-# ----------------------------------------------------------
+
+# Start self-ping in background thread
+_ping_thread = threading.Thread(target=_self_ping_loop, daemon=True)
+_ping_thread.start()
+# ----------------------------------------------------------------
 
 LOGS.info(userbot.__copyright__)
 LOGS.info(f"Licensed under the terms of the {userbot.__license__}")
