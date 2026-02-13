@@ -97,10 +97,13 @@ async def _fetch_insta_media(event, link, catevent):
     pattern="inv(?:\s|$)([\s\S]*)",
     command=("inv", plugin_category),
     info={
-        "header": "Download Instagram video/photo",
-        "description": "Uses Telegram bots to download Instagram media (no login).",
-        "usage": "{tr}inv <link> or reply to message with link",
-        "examples": ["{tr}inv <instagram link>", "{tr}inv (reply)"],
+        "header": "Download Instagram video or photo",
+        "description": "Uses Telegram bots to download Instagram posts/reels (no login). Prefer .inv for Instagram over .dlv.",
+        "usage": [
+            "{tr}inv <instagram link>",
+            "{tr}inv (reply to a message with the link)",
+        ],
+        "examples": ["{tr}inv https://instagram.com/...", "{tr}inv (reply)"],
     },
 )
 async def insta_video(event):
@@ -131,10 +134,13 @@ async def insta_video(event):
     pattern="ina(?:\s|$)([\s\S]*)",
     command=("ina", plugin_category),
     info={
-        "header": "Download Instagram audio (from reel/video)",
-        "description": "Uses Telegram bots to get Instagram media, then extracts audio as MP3.",
-        "usage": "{tr}ina <link> or reply to message with link",
-        "examples": ["{tr}ina <instagram reel link>", "{tr}ina (reply)"],
+        "header": "Download Instagram audio (MP3 from reel/video)",
+        "description": "Gets Instagram media via Telegram bots and extracts audio as MP3. Use for reels/videos; .inv for photos.",
+        "usage": [
+            "{tr}ina <instagram reel/video link>",
+            "{tr}ina (reply to a message with the link)",
+        ],
+        "examples": ["{tr}ina https://instagram.com/reel/...", "{tr}ina (reply)"],
     },
 )
 async def insta_audio(event):

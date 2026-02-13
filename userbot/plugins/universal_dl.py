@@ -9,16 +9,18 @@
 
 import os
 import shutil
+import subprocess
 import time
 
 from urlextract import URLExtract
+
+from userbot import catub
 
 from ..Config import Config
 from ..core import pool
 from ..core.logger import logging
 from ..core.managers import edit_delete, edit_or_reply
 from ..helpers import reply_id
-from . import catub
 
 extractor = URLExtract()
 LOGS = logging.getLogger(__name__)
@@ -49,64 +51,54 @@ def _find_downloaded_file(temp_dir, exclude_extensions=(".jpg", ".jpeg", ".webp"
     return None
 
 
+def _run_ytdlp(args, url, temp_dir, timeout=300):
+    """Run yt-dlp CLI in subprocess (avoids Python import circular-import with ytdl plugin)."""
+    outtmpl = os.path.join(temp_dir, "%(id)s.%(ext)s")
+    cmd = [
+        "python", "-m", "yt_dlp",
+        "-o", outtmpl,
+        "--no-check-certificate",
+        "--no-warnings",
+        "--quiet",
+        *args,
+        url,
+    ]
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        cwd=temp_dir,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr or result.stdout or "yt-dlp failed")
+    path = _find_downloaded_file(temp_dir)
+    if not path:
+        raise RuntimeError("No media file produced")
+    return path
+
+
 @pool.run_in_thread
 def _download_video(url, temp_dir):
     """Download video (best video+audio merged) into temp_dir. Returns path or raises."""
-    from yt_dlp import YoutubeDL
-    from yt_dlp.utils import DownloadError
-
-    opts = {
-        "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-        "outtmpl": os.path.join(temp_dir, "%(id)s.%(ext)s"),
-        "nocheckcertificate": True,
-        "geo_bypass": True,
-        "ignoreerrors": False,
-        "extractor_retries": 3,
-        "quiet": True,
-        "logtostderr": False,
-        "postprocessors": [
-            {"key": "FFmpegVideoConvertor", "preferedformat": "mp4"},
-            {"key": "FFmpegMetadata"},
+    return _run_ytdlp(
+        [
+            "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            "--merge-output-format", "mp4",
         ],
-    }
-    with YoutubeDL(opts) as ydl:
-        ydl.download([url])
-    path = _find_downloaded_file(temp_dir)
-    if not path:
-        raise DownloadError("No video file produced")
-    return path
+        url,
+        temp_dir,
+    )
 
 
 @pool.run_in_thread
 def _download_audio(url, temp_dir):
     """Download and extract audio (MP3) into temp_dir. Returns path or raises."""
-    from yt_dlp import YoutubeDL
-    from yt_dlp.utils import DownloadError
-
-    opts = {
-        "format": "bestaudio/best",
-        "outtmpl": os.path.join(temp_dir, "%(id)s.%(ext)s"),
-        "nocheckcertificate": True,
-        "geo_bypass": True,
-        "ignoreerrors": False,
-        "extractor_retries": 3,
-        "quiet": True,
-        "logtostderr": False,
-        "postprocessors": [
-            {
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "320",
-            },
-            {"key": "FFmpegMetadata"},
-        ],
-    }
-    with YoutubeDL(opts) as ydl:
-        ydl.download([url])
-    path = _find_downloaded_file(temp_dir)
-    if not path:
-        raise DownloadError("No audio file produced")
-    return path
+    return _run_ytdlp(
+        ["-x", "--audio-format", "mp3", "--audio-quality", "320K"],
+        url,
+        temp_dir,
+    )
 
 
 async def _ensure_temp_dir():
@@ -123,9 +115,12 @@ async def _ensure_temp_dir():
     command=("dlv", plugin_category),
     info={
         "header": "Download video from a link",
-        "description": "Downloads video from YouTube, Instagram, TikTok, etc.",
-        "usage": "{tr}dlv <link> or reply to a message with a link",
-        "examples": ["{tr}dlv <link>", "{tr}dlv (reply to message with link)"],
+        "description": "Downloads video from YouTube, TikTok, and other sites (uses yt-dlp). For Instagram use .inv instead.",
+        "usage": [
+            "{tr}dlv <link>",
+            "{tr}dlv (reply to a message containing a link)",
+        ],
+        "examples": ["{tr}dlv https://youtube.com/...", "{tr}dlv (reply)"],
     },
 )
 async def universal_dl_video(event):
@@ -167,10 +162,13 @@ async def universal_dl_video(event):
     pattern="dla(?:\s|$)([\s\S]*)",
     command=("dla", plugin_category),
     info={
-        "header": "Download audio from a link",
-        "description": "Downloads audio (MP3) from YouTube, Instagram, TikTok, etc.",
-        "usage": "{tr}dla <link> or reply to a message with a link",
-        "examples": ["{tr}dla <link>", "{tr}dla (reply to message with link)"],
+        "header": "Download audio (MP3) from a link",
+        "description": "Downloads and extracts audio as MP3 from YouTube, TikTok, etc. For Instagram use .ina instead.",
+        "usage": [
+            "{tr}dla <link>",
+            "{tr}dla (reply to a message containing a link)",
+        ],
+        "examples": ["{tr}dla https://youtube.com/...", "{tr}dla (reply)"],
     },
 )
 async def universal_dl_audio(event):

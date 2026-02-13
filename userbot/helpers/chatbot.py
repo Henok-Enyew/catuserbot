@@ -35,11 +35,19 @@ async def ai_api(event):
 _gemini_client = None
 
 
+def _normalize_api_key(key):
+    """Strip whitespace and surrounding quotes (e.g. from .env)."""
+    if key is None:
+        return ""
+    key = str(key).strip().strip('"').strip("'").strip()
+    return key
+
+
 def _get_gemini_client():
     global _gemini_client
     if _gemini_client is None:
-        api_key = os.environ.get("GEMINI_API_KEY") or getattr(
-            Config, "GEMINI_API_KEY", None
+        api_key = _normalize_api_key(
+            os.environ.get("GEMINI_API_KEY") or getattr(Config, "GEMINI_API_KEY", None)
         )
         if not api_key:
             raise ValueError("GEMINI_API_KEY is not set in environment or config")
@@ -68,6 +76,15 @@ def _get_response_text(response):
     return ""
 
 
+def _make_part(text):
+    """Create a Part from text; works across SDK versions (keyword vs constructor)."""
+    try:
+        return types.Part.from_text(text=text)
+    except TypeError:
+        # Some SDK versions expect Part(text=...) instead of from_text(text=...)
+        return types.Part(text=text)
+
+
 def _openai_to_gemini_contents(messages):
     """Convert OpenAI-style messages (system/user/assistant) to Gemini contents + config."""
     system_instruction = None
@@ -81,9 +98,9 @@ def _openai_to_gemini_contents(messages):
             system_instruction = content
             continue
         if role == "user":
-            contents.append(types.Content(role="user", parts=[types.Part.from_text(text=content)]))
+            contents.append(types.Content(role="user", parts=[_make_part(content)]))
         elif role == "assistant":
-            contents.append(types.Content(role="model", parts=[types.Part.from_text(text=content)]))
+            contents.append(types.Content(role="model", parts=[_make_part(content)]))
     return contents, system_instruction
 
 
@@ -104,7 +121,7 @@ def generate_gpt_response(input_text, chat_id):
         config = types.GenerateContentConfig()
         if system_instruction:
             config.system_instruction = types.Content(
-                parts=[types.Part.from_text(text=system_instruction)]
+                parts=[_make_part(system_instruction)]
             )
         response = client.models.generate_content(
             model=model,
@@ -120,7 +137,11 @@ def generate_gpt_response(input_text, chat_id):
         messages.append({"role": "assistant", "content": generated_text})
         conversations[chat_id] = messages
     except Exception as e:
-        generated_text = f"`Error generating Gemini response: {str(e)}`"
+        err = str(e)
+        if "API key not valid" in err or "API_KEY_INVALID" in err or "400" in err and "INVALID_ARGUMENT" in err:
+            generated_text = "`GEMINI_API_KEY is invalid or expired. Get a valid key from https://aistudio.google.com/apikey and set it in your environment.`"
+        else:
+            generated_text = f"`Error generating Gemini response: {err}`"
     return generated_text
 
 
@@ -148,7 +169,11 @@ def generate_edited_response(input_text, instructions):
         else:
             edited_text = edited_text.strip()
     except Exception as e:
-        edited_text = f"__Error generating edited response:__ `{str(e)}`"
+        err = str(e)
+        if "API key not valid" in err or "API_KEY_INVALID" in err:
+            edited_text = "`GEMINI_API_KEY is invalid or expired. Check https://aistudio.google.com/apikey`"
+        else:
+            edited_text = f"__Error generating edited response:__ `{err}`"
     return edited_text
 
 

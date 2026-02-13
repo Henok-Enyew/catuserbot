@@ -45,7 +45,7 @@ plugin_category = "tools"
 async def _(event):
     "To get guide for catuserbot."
     flag = event.pattern_match.group(1)
-    input_str = event.pattern_match.group(2)
+    input_str = (event.pattern_match.group(2) or "").strip()
     reply_to_id = await reply_id(event)
     if flag and flag == "-c" and input_str:
         outstr = await cmdinfo(input_str, event)
@@ -79,7 +79,9 @@ async def _(event):
 )
 async def _(event):
     "To get list of commands."
-    if input_str := event.pattern_match.group(1):
+    raw = event.pattern_match.group(1)
+    input_str = (raw or "").strip() if raw else None
+    if input_str:
         try:
             cmds = PLG_INFO[input_str]
         except KeyError:

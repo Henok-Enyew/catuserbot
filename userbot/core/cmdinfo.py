@@ -133,11 +133,17 @@ def getkey(val):
 
 
 async def cmdinfo(input_str, event, plugin=False):
-    if input_str[0] == cmdprefix:
-        input_str = input_str[1:]
-    try:
-        about = CMD_INFO[input_str]
-    except KeyError:
+    if not input_str or not isinstance(input_str, str):
+        if plugin:
+            await edit_delete(event, "**Give a plugin or command name.**")
+        else:
+            await edit_delete(event, "**Give a command name.**")
+        return None
+    input_str = input_str.strip()
+    if input_str.startswith(cmdprefix):
+        input_str = input_str.lstrip(cmdprefix).strip()
+    about = CMD_INFO.get(input_str) or CMD_INFO.get(input_str.lower())
+    if about is None:
         if plugin:
             await edit_delete(
                 event,
@@ -147,9 +153,6 @@ async def cmdinfo(input_str, event, plugin=False):
         await edit_delete(
             event, f"**There is no command as **`{input_str}`** in your bot.**"
         )
-        return None
-    except Exception as e:
-        await edit_delete(event, f"**Error**\n`{e}`")
         return None
     outstr = f"**Command :** `{cmdprefix}{input_str}`\n"
     plugin = get_key(input_str)
@@ -163,18 +166,18 @@ async def cmdinfo(input_str, event, plugin=False):
 
 
 async def plugininfo(input_str, event, flag):
-    try:
-        cmds = PLG_INFO[input_str]
-    except KeyError:
+    if not input_str or not isinstance(input_str, str):
+        return await edit_delete(event, "**Give a plugin or command name.**")
+    input_str = input_str.strip()
+    plugin_key = input_str if input_str in PLG_INFO else (input_str.lower() if input_str.lower() in PLG_INFO else None)
+    if plugin_key is None:
         return await cmdinfo(input_str, event, plugin=True)
-    except Exception as e:
-        await edit_delete(event, f"**Error**\n`{e}`")
-        return None
+    cmds = PLG_INFO[plugin_key]
     if len(cmds) == 1 and (flag is None or (flag and flag != "-p")):
         return await cmdinfo(cmds[0], event, plugin=False)
-    outstr = f"**Plugin : **`{input_str}`\n"
+    outstr = f"**Plugin : **`{plugin_key}`\n"
     outstr += f"**Commands Available :** `{len(cmds)}`\n"
-    category = getkey(input_str)
+    category = getkey(plugin_key)
     if category is not None:
         outstr += f"**Category :** `{category}`\n\n"
     for cmd in sorted(cmds):

@@ -44,8 +44,10 @@ tired_response = [
     pattern="addai$",
     command=("addai", plugin_category),
     info={
-        "header": "To add ai chatbot to replied account.",
-        "usage": "{tr}addai <reply>",
+        "header": "Add AI (Gemini) chatbot to a user",
+        "description": "Reply to a user's message to enable AI replies for them until you use .rmai. Requires GEMINI_API_KEY.",
+        "usage": "{tr}addai (reply to a user's message)",
+        "examples": ["{tr}addai (reply to someone)"],
     },
 )
 async def add_chatbot(event):
