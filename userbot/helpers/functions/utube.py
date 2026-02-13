@@ -281,6 +281,28 @@ def download_button(vid: str, body: bool = False):  # sourcery no-metrics
     return buttons
 
 
+def _yt_bypass_opts():
+    """Common yt-dlp options to bypass YouTube bot detection on datacenter IPs."""
+    opts = {
+        "extractor_args": {"youtube": {"player_client": ["mweb", "android"]}},
+        "http_headers": {
+            "User-Agent": (
+                "Mozilla/5.0 (Linux; Android 13; Pixel 7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Mobile Safari/537.36"
+            ),
+        },
+    }
+    # Use cookies file if available
+    cookies_file = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
+        "cookies.txt",
+    )
+    if os.path.isfile(cookies_file):
+        opts["cookiefile"] = cookies_file
+    return opts
+
+
 @pool.run_in_thread
 def _tubeDl(url: str, starttime, uid: str):
     ydl_opts = {
@@ -290,16 +312,14 @@ def _tubeDl(url: str, starttime, uid: str):
         "outtmpl": os.path.join(
             Config.TEMP_DIR, str(starttime), "%(title)s-%(format)s.%(ext)s"
         ),
-        #         "logger": LOGS,
         "format": uid,
         "writethumbnail": True,
         "prefer_ffmpeg": True,
         "postprocessors": [
             {"key": "FFmpegMetadata"}
-            # ERROR R15: Memory quota vastly exceeded
-            # {"key": "FFmpegVideoConvertor", "preferedformat": "mp4"},
         ],
         "quiet": True,
+        **_yt_bypass_opts(),
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -318,7 +338,6 @@ def _tubeDl(url: str, starttime, uid: str):
 def _mp3Dl(url: str, starttime, uid: str):
     _opts = {
         "outtmpl": os.path.join(Config.TEMP_DIR, str(starttime), "%(title)s.%(ext)s"),
-        #         "logger": LOGS,
         "writethumbnail": True,
         "prefer_ffmpeg": True,
         "format": "bestaudio/best",
@@ -330,10 +349,11 @@ def _mp3Dl(url: str, starttime, uid: str):
                 "preferredcodec": "mp3",
                 "preferredquality": uid,
             },
-            {"key": "EmbedThumbnail"},  # ERROR: Conversion failed!
+            {"key": "EmbedThumbnail"},
             {"key": "FFmpegMetadata"},
         ],
         "quiet": True,
+        **_yt_bypass_opts(),
     }
     try:
         with yt_dlp.YoutubeDL(_opts) as ytdl:

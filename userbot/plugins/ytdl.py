@@ -12,6 +12,9 @@ import glob
 import io
 import os
 import pathlib
+import shutil
+import subprocess
+import sys
 from time import time
 
 from telethon.errors.rpcerrorlist import YouBlockedUserError
@@ -64,7 +67,24 @@ video_opts = {
     "outtmpl": "cat_ytv.mp4",
     "logtostderr": False,
     "quiet": True,
+    # YouTube bot-detection bypass for datacenter IPs
+    "extractor_args": {"youtube": {"player_client": ["mweb", "android"]}},
+    "http_headers": {
+        "User-Agent": (
+            "Mozilla/5.0 (Linux; Android 13; Pixel 7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Mobile Safari/537.36"
+        ),
+    },
 }
+
+# Add cookies if file exists
+_cookies_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "cookies.txt")
+if os.path.isfile(_cookies_path):
+    video_opts["cookiefile"] = _cookies_path
+
+YT_AUDIO_BOT = "@YtbAudioBot"
+TTSAVE_BOT = "@ttsavebot"
 
 
 async def ytdl_down(event, opts, url):
@@ -153,12 +173,41 @@ async def fix_attributes(
     return new_attributes, mime_type
 
 
+async def _yta_via_bot(event, url, catevent, reply_to_id):
+    """Fallback: download YouTube audio via @YtbAudioBot."""
+    try:
+        await catevent.edit("`yt-dlp failed, trying @YtbAudioBot...`")
+        async with event.client.conversation(YT_AUDIO_BOT) as conv:
+            try:
+                flag_msg = await conv.send_message(url)
+            except YouBlockedUserError:
+                await catub(unblock("YtbAudioBot"))
+                flag_msg = await conv.send_message(url)
+            # Wait for the bot to process (it may send a text first, then audio)
+            for _ in range(3):
+                resp = await conv.get_response(timeout=30)
+                await event.client.send_read_acknowledge(conv.chat_id)
+                if resp.media and getattr(resp.media, "document", None):
+                    await catevent.delete()
+                    await event.client.send_file(
+                        event.chat_id,
+                        resp.media,
+                        reply_to=reply_to_id,
+                    )
+                    await delete_conv(event, YT_AUDIO_BOT, flag_msg)
+                    return True
+            await delete_conv(event, YT_AUDIO_BOT, flag_msg)
+    except (asyncio.TimeoutError, asyncio.CancelledError, ConnectionError, Exception) as e:
+        LOGS.debug(f"YtbAudioBot fallback failed: {e}")
+    return False
+
+
 @catub.cat_cmd(
     pattern="yta(?:\s|$)([\s\S]*)",
     command=("yta", plugin_category),
     info={
         "header": "To download audio from many sites like Youtube, Facebook, Instagram, etc.",
-        "description": "downloads the audio from the given link ([Supported Sites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md))",
+        "description": "downloads the audio from the given link. Falls back to @YtbAudioBot for YouTube if yt-dlp fails on datacenter IPs.",
         "examples": ["{tr}yta <reply to link>", "{tr}yta <link>"],
     },
 )
@@ -175,15 +224,21 @@ async def download_audio(event):  # sourcery skip: low-code-quality
     reply_to_id = await reply_id(event)
     for url in urls:
         try:
-            vid_data = YoutubeDL({"no-playlist": True}).extract_info(
+            vid_data = YoutubeDL({"no-playlist": True, **video_opts}).extract_info(
                 url, download=False
             )
         except ExtractorError:
             vid_data = {"title": url, "uploader": "Catuserbot", "formats": []}
+        except Exception:
+            vid_data = {"title": url, "uploader": "Catuserbot", "formats": []}
         startTime = time()
         retcode = await _mp3Dl(url=url, starttime=startTime, uid="320")
         if retcode != 0:
-            return await event.edit(str(retcode))
+            # yt-dlp failed -- try Telegram bot fallback for YouTube
+            if "youtube.com" in url or "youtu.be" in url:
+                if await _yta_via_bot(event, url, catevent, reply_to_id):
+                    return
+            return await edit_delete(catevent, f"`Download failed: {retcode}`", 15)
         _fpath = ""
         thumb_pic = None
         for _path in glob.glob(os.path.join(Config.TEMP_DIR, str(startTime), "*")):
@@ -194,17 +249,20 @@ async def download_audio(event):  # sourcery skip: low-code-quality
         if not _fpath:
             return await edit_delete(catevent, "__Unable to upload file__")
         await catevent.edit(
-            f"`Preparing to upload video:`\
-            \n**{vid_data['title']}***"
+            f"`Preparing to upload audio:`\
+            \n**{vid_data['title']}**"
         )
         attributes, mime_type = get_attributes(str(_fpath))
         ul = io.open(pathlib.Path(_fpath), "rb")
         if thumb_pic is None:
-            thumb_pic = str(
-                await pool.run_in_thread(download)(
-                    await get_ytthumb(get_yt_video_id(url))
+            try:
+                thumb_pic = str(
+                    await pool.run_in_thread(download)(
+                        await get_ytthumb(get_yt_video_id(url))
+                    )
                 )
-            )
+            except Exception:
+                thumb_pic = None
         uploaded = await event.client.fast_upload_file(
             file=ul,
             progress_callback=lambda d, t: asyncio.get_event_loop().create_task(
@@ -235,7 +293,8 @@ async def download_audio(event):  # sourcery skip: low-code-quality
             parse_mode="html",
         )
         for _path in [_fpath, thumb_pic]:
-            os.remove(_path)
+            if _path and os.path.exists(_path):
+                os.remove(_path)
     await catevent.delete()
 
 
@@ -440,3 +499,188 @@ async def yt_search(event):
         return await edit_delete(video_q, str(e), time=10, parse_mode=_format.parse_pre)
     reply_text = f"**•  Search Query:**\n`{query}`\n\n**•  Results:**\n{full_response}"
     await edit_or_reply(video_q, reply_text)
+
+
+# ====================== TikTok Downloader ======================
+
+
+def _find_media_file(temp_dir):
+    """Find the primary downloaded media file in temp_dir (skip thumbnails)."""
+    for name in os.listdir(temp_dir):
+        if not name.startswith(".") and not name.lower().endswith(
+            (".jpg", ".jpeg", ".webp", ".png")
+        ):
+            path = os.path.join(temp_dir, name)
+            if os.path.isfile(path):
+                return path
+    return None
+
+
+@pool.run_in_thread
+def _tiktok_ytdlp_video(url, temp_dir):
+    """Download TikTok video via yt-dlp."""
+    outtmpl = os.path.join(temp_dir, "%(id)s.%(ext)s")
+    cmd = [
+        sys.executable, "-m", "yt_dlp",
+        "-o", outtmpl,
+        "--no-check-certificate", "--no-warnings", "--quiet",
+        "-f", "best[ext=mp4]/best",
+        url,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, cwd=temp_dir)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr or result.stdout or "yt-dlp failed for TikTok")
+    path = _find_media_file(temp_dir)
+    if not path:
+        raise RuntimeError("No media file produced")
+    return path
+
+
+@pool.run_in_thread
+def _tiktok_ytdlp_audio(url, temp_dir):
+    """Download TikTok audio (MP3) via yt-dlp."""
+    outtmpl = os.path.join(temp_dir, "%(id)s.%(ext)s")
+    cmd = [
+        sys.executable, "-m", "yt_dlp",
+        "-o", outtmpl,
+        "--no-check-certificate", "--no-warnings", "--quiet",
+        "-x", "--audio-format", "mp3", "--audio-quality", "320K",
+        url,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, cwd=temp_dir)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr or result.stdout or "yt-dlp audio failed for TikTok")
+    path = _find_media_file(temp_dir)
+    if not path:
+        raise RuntimeError("No audio file produced")
+    return path
+
+
+async def _tiktok_via_bot(event, url, catevent, reply_to_id):
+    """Fallback: download TikTok media via @ttsavebot."""
+    try:
+        await catevent.edit("`yt-dlp failed, trying @ttsavebot...`")
+        async with event.client.conversation(TTSAVE_BOT) as conv:
+            try:
+                flag_msg = await conv.send_message(url)
+            except YouBlockedUserError:
+                await catub(unblock("ttsavebot"))
+                flag_msg = await conv.send_message(url)
+            for _ in range(5):
+                resp = await conv.get_response(timeout=20)
+                await event.client.send_read_acknowledge(conv.chat_id)
+                if resp.media:
+                    await catevent.delete()
+                    await event.client.send_file(
+                        event.chat_id, resp.media, reply_to=reply_to_id,
+                    )
+                    await delete_conv(event, TTSAVE_BOT, flag_msg)
+                    return True
+            await delete_conv(event, TTSAVE_BOT, flag_msg)
+    except (asyncio.TimeoutError, asyncio.CancelledError, ConnectionError, Exception) as e:
+        LOGS.debug(f"ttsavebot fallback failed: {e}")
+    return False
+
+
+def _cleanup(temp_dir):
+    if os.path.isdir(temp_dir):
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+@catub.cat_cmd(
+    pattern="ttv(?:\s|$)([\s\S]*)",
+    command=("ttv", plugin_category),
+    info={
+        "header": "Download TikTok video",
+        "description": "Downloads TikTok videos using yt-dlp (fast, no watermark). Falls back to @ttsavebot if yt-dlp fails.",
+        "usage": [
+            "{tr}ttv <tiktok link>",
+            "{tr}ttv (reply to a message with the link)",
+        ],
+        "examples": ["{tr}ttv https://vm.tiktok.com/...", "{tr}ttv (reply)"],
+    },
+)
+async def tiktok_dl_video(event):
+    """Download TikTok video."""
+    msg = event.pattern_match.group(1)
+    rmsg = await event.get_reply_message()
+    if not msg and rmsg:
+        msg = rmsg.text or ""
+    urls = extractor.find_urls(msg)
+    url = urls[0] if urls else None
+    if not url:
+        return await edit_delete(event, "Give a TikTok link or reply to one.", 10)
+
+    catevent = await edit_or_reply(event, "`Downloading TikTok video...`")
+    reply_to_id = await reply_id(event)
+    temp_dir = os.path.join(Config.TEMP_DIR, f"ttv_{event.id}")
+    os.makedirs(temp_dir, exist_ok=True)
+
+    try:
+        path = await _tiktok_ytdlp_video(url, temp_dir)
+    except Exception as e:
+        LOGS.debug(f"TikTok yt-dlp video failed: {e}")
+        if await _tiktok_via_bot(event, url, catevent, reply_to_id):
+            _cleanup(temp_dir)
+            return
+        _cleanup(temp_dir)
+        return await edit_delete(catevent, f"`Download failed: {e}`", 15)
+
+    try:
+        await catevent.edit("`Uploading...`")
+        await event.client.send_file(
+            event.chat_id, path, reply_to=reply_to_id, supports_streaming=True,
+        )
+    finally:
+        _cleanup(temp_dir)
+    await catevent.delete()
+
+
+@catub.cat_cmd(
+    pattern="tta(?:\s|$)([\s\S]*)",
+    command=("tta", plugin_category),
+    info={
+        "header": "Download TikTok audio (MP3)",
+        "description": "Extracts audio from TikTok videos as MP3 using yt-dlp. Falls back to @ttsavebot if yt-dlp fails.",
+        "usage": [
+            "{tr}tta <tiktok link>",
+            "{tr}tta (reply to a message with the link)",
+        ],
+        "examples": ["{tr}tta https://vm.tiktok.com/...", "{tr}tta (reply)"],
+    },
+)
+async def tiktok_dl_audio(event):
+    """Download TikTok audio as MP3."""
+    msg = event.pattern_match.group(1)
+    rmsg = await event.get_reply_message()
+    if not msg and rmsg:
+        msg = rmsg.text or ""
+    urls = extractor.find_urls(msg)
+    url = urls[0] if urls else None
+    if not url:
+        return await edit_delete(event, "Give a TikTok link or reply to one.", 10)
+
+    catevent = await edit_or_reply(event, "`Downloading TikTok audio...`")
+    reply_to_id = await reply_id(event)
+    temp_dir = os.path.join(Config.TEMP_DIR, f"tta_{event.id}")
+    os.makedirs(temp_dir, exist_ok=True)
+
+    try:
+        path = await _tiktok_ytdlp_audio(url, temp_dir)
+    except Exception as e:
+        LOGS.debug(f"TikTok yt-dlp audio failed: {e}")
+        # For audio, bot fallback gives video; we can still try it
+        if await _tiktok_via_bot(event, url, catevent, reply_to_id):
+            _cleanup(temp_dir)
+            return
+        _cleanup(temp_dir)
+        return await edit_delete(catevent, f"`Download failed: {e}`", 15)
+
+    try:
+        await catevent.edit("`Uploading...`")
+        await event.client.send_file(
+            event.chat_id, path, reply_to=reply_to_id,
+        )
+    finally:
+        _cleanup(temp_dir)
+    await catevent.delete()
