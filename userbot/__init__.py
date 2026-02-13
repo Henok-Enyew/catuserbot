@@ -7,6 +7,7 @@
 # Please see: https://github.com/TgCatUB/catuserbot/blob/master/LICENSE
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 
+import asyncio
 import signal
 import sys
 import time
@@ -36,9 +37,20 @@ catversion = "3.3.0"
 
 
 def close_connection(*_):
+    """Handle SIGTERM/SIGINT: schedule disconnect on the running loop (safe on Render/Docker)."""
     print("Closing Userbot connection.")
-    runasync(catub.disconnect())
-    sys.exit(143)
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # Loop already running in run_until_disconnected(); schedule disconnect so it runs next iteration
+            asyncio.ensure_future(catub.disconnect(), loop=loop)
+            # Do not sys.exit here: let the scheduled disconnect run, then run_until_disconnected() returns
+        else:
+            loop.run_until_complete(catub.disconnect())
+            sys.exit(143)
+    except Exception as e:
+        LOGS.warning(f"close_connection: {e}")
+        sys.exit(143)
 
 
 signal.signal(signal.SIGTERM, close_connection)
