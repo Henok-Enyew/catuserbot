@@ -22,8 +22,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
 ## Copy project first
 COPY . .
 
-## Install only the new Gemini dependency (base image has the rest; full requirements.txt conflicts with Python 3.9 e.g. yt-dlp)
-RUN pip install --no-cache-dir google-genai
+## Install/upgrade key dependencies (base image has the rest)
+## - google-genai: Gemini AI
+## - yt-dlp: latest version needed to bypass YouTube bot detection
+RUN pip install --no-cache-dir google-genai && \
+    pip install --no-cache-dir -U yt-dlp
 
 ENV PATH="/home/userbot/bin:$PATH"
 

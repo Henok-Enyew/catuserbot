@@ -132,6 +132,10 @@ class CatUserBotClient(TelegramClient):
                     raise events.StopPropagation from e
                 except KeyboardInterrupt:
                     pass
+                except asyncio.CancelledError:
+                    pass  # Task cancelled (e.g. during shutdown) -- don't report, don't crash
+                except ConnectionError:
+                    pass  # Client disconnected -- silently ignore
                 except MessageNotModifiedError:
                     LOGS.error("Message was same as previous message")
                 except MessageIdInvalidError:
@@ -166,46 +170,55 @@ class CatUserBotClient(TelegramClient):
                 except BaseException as e:
                     LOGS.exception(e)
                     if not disable_errors:
-                        if Config.PRIVATE_GROUP_BOT_API_ID == 0:
-                            return
-                        date = (datetime.datetime.now()).strftime("%m/%d/%Y, %H:%M:%S")
-                        ftext = f"\nDisclaimer:\nThis file is pasted only here ONLY here,\
-                                  \nwe logged only fact of error and date,\nwe respect your privacy,\
-                                  \nyou may not report this error if you've\
-                                  \nany confidential data here, no one will see your data\
-                                  \n\n--------BEGIN USERBOT TRACEBACK LOG--------\
-                                  \nDate: {date}\nGroup ID: {str(check.chat_id)}\
-                                  \nSender ID: {str(check.sender_id)}\
-                                  \nMessage Link: {await check.client.get_msg_link(check)}\
-                                  \n\nEvent Trigger:\n{str(check.text)}\
-                                  \n\nTraceback info:\n{str(traceback.format_exc())}\
-                                  \n\nError text:\n{str(sys.exc_info()[1])}"
-                        new = {
-                            "error": str(sys.exc_info()[1]),
-                            "date": datetime.datetime.now(),
-                        }
-                        ftext += "\n\n--------END USERBOT TRACEBACK LOG--------"
-                        ftext += "\n\n\nLast 5 commits:\n"
-                        command = 'git log --pretty=format:"%an: %s" -5'
-                        output = (await runcmd(command))[:2]
-                        result = output[0] + output[1]
-                        ftext += result
-                        pastelink = await paste_message(
-                            ftext, pastetype="s", markdown=False
-                        )
-                        link = "[here](https://t.me/catuserbot_support)"
-                        text = (
-                            "**CatUserbot Error report**\n\n"
-                            + "If you wanna you can report it"
-                        )
-                        text += f"- just forward this message {link}.\n"
-                        text += (
-                            "Nothing is logged except the fact of error and date\n\n"
-                        )
-                        text += f"**Error report : ** [{new['error']}]({pastelink})"
-                        await check.client.send_message(
-                            Config.PRIVATE_GROUP_BOT_API_ID, text, link_preview=False
-                        )
+                        try:
+                            if Config.PRIVATE_GROUP_BOT_API_ID == 0:
+                                return
+                            date = (datetime.datetime.now()).strftime(
+                                "%m/%d/%Y, %H:%M:%S"
+                            )
+                            ftext = f"\nDisclaimer:\nThis file is pasted only here ONLY here,\
+                                      \nwe logged only fact of error and date,\nwe respect your privacy,\
+                                      \nyou may not report this error if you've\
+                                      \nany confidential data here, no one will see your data\
+                                      \n\n--------BEGIN USERBOT TRACEBACK LOG--------\
+                                      \nDate: {date}\nGroup ID: {str(check.chat_id)}\
+                                      \nSender ID: {str(check.sender_id)}\
+                                      \nMessage Link: {await check.client.get_msg_link(check)}\
+                                      \n\nEvent Trigger:\n{str(check.text)}\
+                                      \n\nTraceback info:\n{str(traceback.format_exc())}\
+                                      \n\nError text:\n{str(sys.exc_info()[1])}"
+                            new = {
+                                "error": str(sys.exc_info()[1]),
+                                "date": datetime.datetime.now(),
+                            }
+                            ftext += "\n\n--------END USERBOT TRACEBACK LOG--------"
+                            ftext += "\n\n\nLast 5 commits:\n"
+                            command = 'git log --pretty=format:"%an: %s" -5'
+                            output = (await runcmd(command))[:2]
+                            result = output[0] + output[1]
+                            ftext += result
+                            pastelink = await paste_message(
+                                ftext, pastetype="s", markdown=False
+                            )
+                            link = "[here](https://t.me/catuserbot_support)"
+                            text = (
+                                "**CatUserbot Error report**\n\n"
+                                + "If you wanna you can report it"
+                            )
+                            text += f"- just forward this message {link}.\n"
+                            text += (
+                                "Nothing is logged except the fact of error and date\n\n"
+                            )
+                            text += (
+                                f"**Error report : ** [{new['error']}]({pastelink})"
+                            )
+                            await check.client.send_message(
+                                Config.PRIVATE_GROUP_BOT_API_ID,
+                                text,
+                                link_preview=False,
+                            )
+                        except Exception:
+                            LOGS.debug("Failed to send error report (client may be disconnected)")
 
             from .session import catub
 
@@ -298,54 +311,66 @@ class CatUserBotClient(TelegramClient):
                     raise events.StopPropagation from e
                 except KeyboardInterrupt:
                     pass
+                except asyncio.CancelledError:
+                    pass
+                except ConnectionError:
+                    pass
                 except MessageNotModifiedError:
                     LOGS.error("Message was same as previous message")
                 except MessageIdInvalidError:
                     LOGS.error("Message was deleted or cant be found")
                 except BaseException as e:
-                    # Check if we have to disable error logging.
-                    LOGS.exception(e)  # Log the error in console
+                    LOGS.exception(e)
                     if not disable_errors:
-                        if Config.PRIVATE_GROUP_BOT_API_ID == 0:
-                            return
-                        date = (datetime.datetime.now()).strftime("%m/%d/%Y, %H:%M:%S")
-                        ftext = f"\nDisclaimer:\nThis file is pasted only here ONLY here,\
-                                    \nwe logged only fact of error and date,\nwe respect your privacy,\
-                                    \nyou may not report this error if you've\
-                                    \nany confidential data here, no one will see your data\
-                                    \n\n--------BEGIN USERBOT TRACEBACK LOG--------\
-                                    \nDate: {date}\nGroup ID: {str(check.chat_id)}\
-                                    \nSender ID: {str(check.sender_id)}\
-                                    \nMessage Link: {await check.client.get_msg_link(check)}\
-                                    \n\nEvent Trigger:\n{str(check.text)}\
-                                    \n\nTraceback info:\n{str(traceback.format_exc())}\
-                                    \n\nError text:\n{str(sys.exc_info()[1])}"
-                        new = {
-                            "error": str(sys.exc_info()[1]),
-                            "date": datetime.datetime.now(),
-                        }
-                        ftext += "\n\n--------END USERBOT TRACEBACK LOG--------"
-                        command = 'git log --pretty=format:"%an: %s" -5'
-                        ftext += "\n\n\nLast 5 commits:\n"
-                        output = (await runcmd(command))[:2]
-                        result = output[0] + output[1]
-                        ftext += result
-                        pastelink = await paste_message(
-                            ftext, pastetype="s", markdown=False
-                        )
-                        link = "[here](https://t.me/catuserbot_support)"
-                        text = (
-                            "**CatUserbot Error report**\n\n"
-                            + "If you wanna you can report it"
-                        )
-                        text += f"- just forward this message {link}.\n"
-                        text += (
-                            "Nothing is logged except the fact of error and date\n\n"
-                        )
-                        text += f"**Error report : ** [{new['error']}]({pastelink})"
-                        await check.client.send_message(
-                            Config.PRIVATE_GROUP_BOT_API_ID, text, link_preview=False
-                        )
+                        try:
+                            if Config.PRIVATE_GROUP_BOT_API_ID == 0:
+                                return
+                            date = (datetime.datetime.now()).strftime(
+                                "%m/%d/%Y, %H:%M:%S"
+                            )
+                            ftext = f"\nDisclaimer:\nThis file is pasted only here ONLY here,\
+                                        \nwe logged only fact of error and date,\nwe respect your privacy,\
+                                        \nyou may not report this error if you've\
+                                        \nany confidential data here, no one will see your data\
+                                        \n\n--------BEGIN USERBOT TRACEBACK LOG--------\
+                                        \nDate: {date}\nGroup ID: {str(check.chat_id)}\
+                                        \nSender ID: {str(check.sender_id)}\
+                                        \nMessage Link: {await check.client.get_msg_link(check)}\
+                                        \n\nEvent Trigger:\n{str(check.text)}\
+                                        \n\nTraceback info:\n{str(traceback.format_exc())}\
+                                        \n\nError text:\n{str(sys.exc_info()[1])}"
+                            new = {
+                                "error": str(sys.exc_info()[1]),
+                                "date": datetime.datetime.now(),
+                            }
+                            ftext += "\n\n--------END USERBOT TRACEBACK LOG--------"
+                            command = 'git log --pretty=format:"%an: %s" -5'
+                            ftext += "\n\n\nLast 5 commits:\n"
+                            output = (await runcmd(command))[:2]
+                            result = output[0] + output[1]
+                            ftext += result
+                            pastelink = await paste_message(
+                                ftext, pastetype="s", markdown=False
+                            )
+                            link = "[here](https://t.me/catuserbot_support)"
+                            text = (
+                                "**CatUserbot Error report**\n\n"
+                                + "If you wanna you can report it"
+                            )
+                            text += f"- just forward this message {link}.\n"
+                            text += (
+                                "Nothing is logged except the fact of error and date\n\n"
+                            )
+                            text += (
+                                f"**Error report : ** [{new['error']}]({pastelink})"
+                            )
+                            await check.client.send_message(
+                                Config.PRIVATE_GROUP_BOT_API_ID,
+                                text,
+                                link_preview=False,
+                            )
+                        except Exception:
+                            LOGS.debug("Failed to send error report (client may be disconnected)")
 
             from .session import catub
 

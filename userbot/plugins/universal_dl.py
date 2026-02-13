@@ -7,6 +7,7 @@
 # Please see: https://github.com/TgCatUB/catuserbot/blob/master/LICENSE
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 
+import json
 import os
 import shutil
 import subprocess
@@ -27,6 +28,12 @@ extractor = URLExtract()
 LOGS = logging.getLogger(__name__)
 
 plugin_category = "misc"
+
+# Path to optional cookies file (place cookies.txt in the project root or set COOKIES_FILE env)
+COOKIES_FILE = os.environ.get(
+    "COOKIES_FILE",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "cookies.txt"),
+)
 
 
 def _get_first_url(text):
@@ -52,8 +59,14 @@ def _find_downloaded_file(temp_dir, exclude_extensions=(".jpg", ".jpeg", ".webp"
     return None
 
 
+def _is_youtube_url(url):
+    """Check if URL is a YouTube link."""
+    yt_hosts = ("youtube.com", "youtu.be", "youtube-nocookie.com", "m.youtube.com")
+    return any(h in url.lower() for h in yt_hosts)
+
+
 def _run_ytdlp(args, url, temp_dir, timeout=300):
-    """Run yt-dlp CLI in subprocess (avoids Python import circular-import with ytdl plugin)."""
+    """Run yt-dlp with enhanced options to bypass YouTube bot detection."""
     outtmpl = os.path.join(temp_dir, "%(id)s.%(ext)s")
     cmd = [
         sys.executable, "-m", "yt_dlp",
@@ -61,9 +74,17 @@ def _run_ytdlp(args, url, temp_dir, timeout=300):
         "--no-check-certificate",
         "--no-warnings",
         "--quiet",
-        *args,
-        url,
     ]
+    # Use cookies file if available (needed for YouTube on datacenter IPs)
+    if os.path.isfile(COOKIES_FILE):
+        cmd += ["--cookies", COOKIES_FILE]
+    # YouTube-specific: try alternate player clients to dodge bot detection
+    if _is_youtube_url(url):
+        cmd += [
+            "--extractor-args", "youtube:player_client=mweb,android",
+            "--user-agent", "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+        ]
+    cmd += [*args, url]
     result = subprocess.run(
         cmd,
         capture_output=True,
@@ -72,34 +93,117 @@ def _run_ytdlp(args, url, temp_dir, timeout=300):
         cwd=temp_dir,
     )
     if result.returncode != 0:
-        raise RuntimeError(result.stderr or result.stdout or "yt-dlp failed")
+        error_msg = (result.stderr or result.stdout or "yt-dlp failed").strip()
+        # Provide user-friendly message for common YouTube blocks
+        if "Sign in to confirm" in error_msg or "bot" in error_msg.lower():
+            raise RuntimeError(
+                "YouTube blocked the request (datacenter IP detected). "
+                "Try a non-YouTube link, or add a cookies.txt file to the project root."
+            )
+        raise RuntimeError(error_msg)
     path = _find_downloaded_file(temp_dir)
     if not path:
         raise RuntimeError("No media file produced")
     return path
 
 
+def _try_cobalt_download(url, temp_dir, audio_only=False):
+    """Try downloading via cobalt API (works for YouTube, TikTok, Twitter, etc.). Returns path or None."""
+    try:
+        import requests
+    except ImportError:
+        return None
+    # Try multiple cobalt instances
+    cobalt_instances = [
+        "https://api.cobalt.tools",
+    ]
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+    body = {"url": url}
+    if audio_only:
+        body["downloadMode"] = "audio"
+        body["audioFormat"] = "mp3"
+    for instance in cobalt_instances:
+        try:
+            resp = requests.post(
+                instance,
+                json=body,
+                headers=headers,
+                timeout=30,
+            )
+            if resp.status_code != 200:
+                continue
+            data = resp.json()
+            dl_url = data.get("url")
+            if not dl_url:
+                # Handle picker responses (multiple formats)
+                picker = data.get("picker")
+                if picker and len(picker) > 0:
+                    dl_url = picker[0].get("url")
+            if not dl_url:
+                continue
+            # Download the actual file
+            ext = "mp3" if audio_only else "mp4"
+            out_path = os.path.join(temp_dir, f"cobalt_dl.{ext}")
+            dl_resp = requests.get(dl_url, timeout=120, stream=True)
+            if dl_resp.status_code == 200:
+                with open(out_path, "wb") as f:
+                    for chunk in dl_resp.iter_content(chunk_size=1024 * 1024):
+                        f.write(chunk)
+                if os.path.isfile(out_path) and os.path.getsize(out_path) > 1000:
+                    return out_path
+        except Exception as e:
+            LOGS.debug(f"Cobalt instance {instance} failed: {e}")
+            continue
+    return None
+
+
 @pool.run_in_thread
 def _download_video(url, temp_dir):
-    """Download video (best video+audio merged) into temp_dir. Returns path or raises."""
-    return _run_ytdlp(
-        [
-            "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-            "--merge-output-format", "mp4",
-        ],
-        url,
-        temp_dir,
-    )
+    """Download video -- tries cobalt first (for YouTube), then yt-dlp."""
+    if _is_youtube_url(url):
+        cobalt_path = _try_cobalt_download(url, temp_dir, audio_only=False)
+        if cobalt_path:
+            return cobalt_path
+    try:
+        return _run_ytdlp(
+            [
+                "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+                "--merge-output-format", "mp4",
+            ],
+            url,
+            temp_dir,
+        )
+    except RuntimeError:
+        # If yt-dlp fails and we haven't tried cobalt yet, try it
+        if not _is_youtube_url(url):
+            cobalt_path = _try_cobalt_download(url, temp_dir, audio_only=False)
+            if cobalt_path:
+                return cobalt_path
+        raise
 
 
 @pool.run_in_thread
 def _download_audio(url, temp_dir):
-    """Download and extract audio (MP3) into temp_dir. Returns path or raises."""
-    return _run_ytdlp(
-        ["-x", "--audio-format", "mp3", "--audio-quality", "320K"],
-        url,
-        temp_dir,
-    )
+    """Download audio -- tries cobalt first (for YouTube), then yt-dlp."""
+    if _is_youtube_url(url):
+        cobalt_path = _try_cobalt_download(url, temp_dir, audio_only=True)
+        if cobalt_path:
+            return cobalt_path
+    try:
+        return _run_ytdlp(
+            ["-x", "--audio-format", "mp3", "--audio-quality", "320K"],
+            url,
+            temp_dir,
+        )
+    except RuntimeError:
+        if not _is_youtube_url(url):
+            cobalt_path = _try_cobalt_download(url, temp_dir, audio_only=True)
+            if cobalt_path:
+                return cobalt_path
+        raise
 
 
 async def _ensure_temp_dir():
@@ -116,7 +220,7 @@ async def _ensure_temp_dir():
     command=("dlv", plugin_category),
     info={
         "header": "Download video from a link",
-        "description": "Downloads video from YouTube, TikTok, and other sites (uses yt-dlp). For Instagram use .inv instead.",
+        "description": "Downloads video from YouTube, TikTok, Twitter, and other sites. For Instagram use .inv instead.",
         "usage": [
             "{tr}dlv <link>",
             "{tr}dlv (reply to a message containing a link)",

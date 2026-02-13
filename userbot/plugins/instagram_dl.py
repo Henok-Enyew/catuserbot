@@ -40,57 +40,68 @@ def _extract_instagram_link(text):
 async def _fetch_insta_media(event, link, catevent):
     """Use Telegram bots to fetch Instagram media. Returns (media_list, conv_chat, flag_msg) or (None, None, None)."""
     media_list = []
-    async with event.client.conversation(BOT_V1) as conv:
-        try:
-            v1_flag = await conv.send_message("/start")
-        except YouBlockedUserError:
-            await catub(unblock(BOT_V1))
-            v1_flag = await conv.send_message("/start")
-        checker = await conv.get_response()
-        await event.client.send_read_acknowledge(conv.chat_id)
-        if "Choose the language you like" in checker.message:
-            await checker.click(1)
-            await conv.send_message(link)
-            await conv.get_response()
+    try:
+        async with event.client.conversation(BOT_V1) as conv:
+            try:
+                v1_flag = await conv.send_message("/start")
+            except YouBlockedUserError:
+                await catub(unblock(BOT_V1))
+                v1_flag = await conv.send_message("/start")
+            checker = await conv.get_response(timeout=15)
             await event.client.send_read_acknowledge(conv.chat_id)
-        await conv.send_message(link)
-        await conv.get_response()
-        await event.client.send_read_acknowledge(conv.chat_id)
-        try:
-            media = await conv.get_response(timeout=10)
+            if "Choose the language you like" in checker.message:
+                await checker.click(1)
+                await conv.send_message(link)
+                await conv.get_response(timeout=15)
+                await event.client.send_read_acknowledge(conv.chat_id)
+            await conv.send_message(link)
+            await conv.get_response(timeout=15)
+            await event.client.send_read_acknowledge(conv.chat_id)
+            try:
+                media = await conv.get_response(timeout=15)
+                await event.client.send_read_acknowledge(conv.chat_id)
+                if media.media:
+                    while True:
+                        media_list.append(media)
+                        try:
+                            media = await conv.get_response(timeout=3)
+                            await event.client.send_read_acknowledge(conv.chat_id)
+                        except asyncio.TimeoutError:
+                            break
+                    return media_list, BOT_V1, v1_flag
+            except asyncio.TimeoutError:
+                pass
+            await delete_conv(event, BOT_V1, v1_flag)
+    except (asyncio.TimeoutError, asyncio.CancelledError, ConnectionError) as e:
+        LOGS.debug(f"Instagram bot V1 failed: {e}")
+        pass
+
+    try:
+        await edit_or_reply(catevent, "**Switching to backup bot...**")
+    except Exception:
+        pass
+    try:
+        async with event.client.conversation(BOT_V2) as conv:
+            try:
+                v2_flag = await conv.send_message("/start")
+            except YouBlockedUserError:
+                await catub(unblock("videomaniacbot"))
+                v2_flag = await conv.send_message("/start")
+            await conv.get_response(timeout=15)
+            await event.client.send_read_acknowledge(conv.chat_id)
+            await asyncio.sleep(1)
+            await conv.send_message(link)
+            await conv.get_response(timeout=15)
+            await event.client.send_read_acknowledge(conv.chat_id)
+            media = await conv.get_response(timeout=20)
             await event.client.send_read_acknowledge(conv.chat_id)
             if media.media:
-                while True:
-                    media_list.append(media)
-                    try:
-                        media = await conv.get_response(timeout=2)
-                        await event.client.send_read_acknowledge(conv.chat_id)
-                    except asyncio.TimeoutError:
-                        break
-                return media_list, BOT_V1, v1_flag
-        except asyncio.TimeoutError:
-            pass
-        await delete_conv(event, BOT_V1, v1_flag)
-
-    await edit_or_reply(catevent, "**Switching to backup bot...**")
-    async with event.client.conversation(BOT_V2) as conv:
-        try:
-            v2_flag = await conv.send_message("/start")
-        except YouBlockedUserError:
-            await catub(unblock("videomaniacbot"))
-            v2_flag = await conv.send_message("/start")
-        await conv.get_response()
-        await event.client.send_read_acknowledge(conv.chat_id)
-        await asyncio.sleep(1)
-        await conv.send_message(link)
-        await conv.get_response()
-        await event.client.send_read_acknowledge(conv.chat_id)
-        media = await conv.get_response()
-        await event.client.send_read_acknowledge(conv.chat_id)
-        if media.media:
-            return [media], BOT_V2, v2_flag
-        await delete_conv(event, BOT_V2, v2_flag)
-        return None, None, None
+                return [media], BOT_V2, v2_flag
+            await delete_conv(event, BOT_V2, v2_flag)
+    except (asyncio.TimeoutError, asyncio.CancelledError, ConnectionError) as e:
+        LOGS.debug(f"Instagram bot V2 failed: {e}")
+        pass
+    return None, None, None
 
 
 @catub.cat_cmd(
