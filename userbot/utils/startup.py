@@ -15,6 +15,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from telethon import Button, functions, types, utils
+from telethon.errors.rpcerrorlist import AuthKeyDuplicatedError, FloodWaitError
 
 from userbot import BOTLOG, BOTLOG_CHATID, PM_LOGGER_GROUP_ID
 
@@ -68,6 +69,28 @@ async def setup_bot():
         catub.uid = catub.tgbot.uid = utils.get_peer_id(catub.me)
         if Config.OWNER_ID == 0:
             Config.OWNER_ID = utils.get_peer_id(catub.me)
+    except AuthKeyDuplicatedError:
+        LOGS.error(
+            "\n\n"
+            "========== STRING_SESSION IS DEAD ==========\n"
+            "Your STRING_SESSION was used from two different IPs at the same time\n"
+            "(e.g. Render restarted while old instance was still running).\n"
+            "Telegram has PERMANENTLY revoked this session.\n\n"
+            "TO FIX:\n"
+            "  1. Generate a NEW string session by running:\n"
+            "       python3 generate_session.py\n"
+            "  2. Copy the new session string\n"
+            "  3. Update STRING_SESSION in your Render environment variables\n"
+            "  4. Redeploy\n"
+            "============================================\n"
+        )
+        sys.exit(1)
+    except FloodWaitError as e:
+        LOGS.warning(f"Telegram FloodWait during setup: waiting {e.seconds}s...")
+        import asyncio
+        await asyncio.sleep(e.seconds)
+        # Retry once after waiting
+        return await setup_bot()
     except Exception as e:
         LOGS.error(f"STRING_SESSION - {e}")
         sys.exit()

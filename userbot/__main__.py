@@ -8,7 +8,10 @@
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
 
 import contextlib
+import os
 import sys
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import userbot
 from userbot import BOTLOG_CHATID, PM_LOGGER_GROUP_ID
@@ -26,6 +29,32 @@ from .utils import (
 )
 
 LOGS = logging.getLogger("CatUserbot")
+
+
+# --------------- Render health-check server ---------------
+# Render Web Services require an open port. This tiny HTTP server
+# responds to health checks so Render doesn't kill the process.
+class _HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"CatUserBot is alive")
+
+    def log_message(self, *args):
+        pass  # suppress noisy HTTP logs
+
+
+def _start_health_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    LOGS.info(f"Health-check server listening on port {port}")
+
+
+_start_health_server()
+# ----------------------------------------------------------
 
 LOGS.info(userbot.__copyright__)
 LOGS.info(f"Licensed under the terms of the {userbot.__license__}")
