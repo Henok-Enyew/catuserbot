@@ -53,6 +53,21 @@ conversations = {}
 GEMINI_MODEL = "gemini-2.0-flash"
 
 
+def _get_response_text(response):
+    """Extract text from Gemini response; avoid .text if it raises."""
+    try:
+        if getattr(response, "text", None):
+            return response.text
+    except (TypeError, AttributeError):
+        pass
+    try:
+        if response.candidates and response.candidates[0].content.parts:
+            return getattr(response.candidates[0].content.parts[0], "text", None) or ""
+    except (AttributeError, IndexError):
+        pass
+    return ""
+
+
 def _openai_to_gemini_contents(messages):
     """Convert OpenAI-style messages (system/user/assistant) to Gemini contents + config."""
     system_instruction = None
@@ -66,9 +81,9 @@ def _openai_to_gemini_contents(messages):
             system_instruction = content
             continue
         if role == "user":
-            contents.append(types.Content(role="user", parts=[types.Part.from_text(content)]))
+            contents.append(types.Content(role="user", parts=[types.Part.from_text(text=content)]))
         elif role == "assistant":
-            contents.append(types.Content(role="model", parts=[types.Part.from_text(content)]))
+            contents.append(types.Content(role="model", parts=[types.Part.from_text(text=content)]))
     return contents, system_instruction
 
 
@@ -89,17 +104,18 @@ def generate_gpt_response(input_text, chat_id):
         config = types.GenerateContentConfig()
         if system_instruction:
             config.system_instruction = types.Content(
-                parts=[types.Part.from_text(system_instruction)]
+                parts=[types.Part.from_text(text=system_instruction)]
             )
         response = client.models.generate_content(
             model=model,
             contents=contents,
             config=config,
         )
-        if not response.text:
+        generated_text = _get_response_text(response)
+        if not generated_text:
             generated_text = "`No text in Gemini response.`"
         else:
-            generated_text = response.text.strip()
+            generated_text = generated_text.strip()
 
         messages.append({"role": "assistant", "content": generated_text})
         conversations[chat_id] = messages
@@ -126,10 +142,11 @@ def generate_edited_response(input_text, instructions):
             model=GEMINI_MODEL,
             contents=prompt,
         )
-        if not response.text:
+        edited_text = _get_response_text(response)
+        if not edited_text:
             edited_text = "__Error: Gemini returned no text.__"
         else:
-            edited_text = response.text.strip()
+            edited_text = edited_text.strip()
     except Exception as e:
         edited_text = f"__Error generating edited response:__ `{str(e)}`"
     return edited_text

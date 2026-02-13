@@ -12,8 +12,6 @@ import shutil
 import time
 
 from urlextract import URLExtract
-from yt_dlp import YoutubeDL
-from yt_dlp.utils import DownloadError, ExtractorError, GeoRestrictedError
 
 from ..Config import Config
 from ..core import pool
@@ -54,6 +52,9 @@ def _find_downloaded_file(temp_dir, exclude_extensions=(".jpg", ".jpeg", ".webp"
 @pool.run_in_thread
 def _download_video(url, temp_dir):
     """Download video (best video+audio merged) into temp_dir. Returns path or raises."""
+    from yt_dlp import YoutubeDL
+    from yt_dlp.utils import DownloadError
+
     opts = {
         "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
         "outtmpl": os.path.join(temp_dir, "%(id)s.%(ext)s"),
@@ -79,6 +80,9 @@ def _download_video(url, temp_dir):
 @pool.run_in_thread
 def _download_audio(url, temp_dir):
     """Download and extract audio (MP3) into temp_dir. Returns path or raises."""
+    from yt_dlp import YoutubeDL
+    from yt_dlp.utils import DownloadError
+
     opts = {
         "format": "bestaudio/best",
         "outtmpl": os.path.join(temp_dir, "%(id)s.%(ext)s"),
@@ -139,19 +143,11 @@ async def universal_dl_video(event):
     catevent = await edit_or_reply(event, "`Downloading...`")
     try:
         path = await _download_video(url, temp_dir)
-    except DownloadError as e:
-        if os.path.isdir(temp_dir):
-            shutil.rmtree(temp_dir, ignore_errors=True)
-        return await edit_delete(catevent, f"`Download failed: {e}`", 15)
-    except (ExtractorError, GeoRestrictedError) as e:
-        if os.path.isdir(temp_dir):
-            shutil.rmtree(temp_dir, ignore_errors=True)
-        return await edit_delete(catevent, f"`Download failed: {e}`", 15)
     except Exception as e:
         LOGS.exception("universal_dl video")
         if os.path.isdir(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
-        return await edit_delete(catevent, f"`Error: {e}`", 15)
+        return await edit_delete(catevent, f"`Download failed: {e}`", 15)
     try:
         await catevent.edit("`Uploading...`")
         reply_to_id = await reply_id(event)
@@ -192,19 +188,11 @@ async def universal_dl_audio(event):
     catevent = await edit_or_reply(event, "`Downloading...`")
     try:
         path = await _download_audio(url, temp_dir)
-    except DownloadError as e:
-        if os.path.isdir(temp_dir):
-            shutil.rmtree(temp_dir, ignore_errors=True)
-        return await edit_delete(catevent, f"`Download failed: {e}`", 15)
-    except (ExtractorError, GeoRestrictedError) as e:
-        if os.path.isdir(temp_dir):
-            shutil.rmtree(temp_dir, ignore_errors=True)
-        return await edit_delete(catevent, f"`Download failed: {e}`", 15)
     except Exception as e:
         LOGS.exception("universal_dl audio")
         if os.path.isdir(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
-        return await edit_delete(catevent, f"`Error: {e}`", 15)
+        return await edit_delete(catevent, f"`Download failed: {e}`", 15)
     try:
         await catevent.edit("`Uploading...`")
         reply_to_id = await reply_id(event)
