@@ -19,8 +19,10 @@ __version__ = "3.3.0"
 
 loop = None
 
-if Config.STRING_SESSION:
-    session = StringSession(str(Config.STRING_SESSION))
+# Normalize STRING_SESSION: strip quotes/whitespace from env (e.g. Docker --env-file)
+_raw_session = (Config.STRING_SESSION or "").strip().strip('"').strip("'")
+if _raw_session and len(_raw_session) > 20:
+    session = StringSession(_raw_session)
 else:
     session = "catuserbot"
 

@@ -129,8 +129,10 @@ class Config(object):
     LASTFM_SECRET = os.environ.get("LASTFM_SECRET", None)
     LASTFM_USERNAME = os.environ.get("LASTFM_USERNAME", None)
     LASTFM_PASSWORD = os.environ.get("LASTFM_PASSWORD", None)
-    # Open ai api // get from here: https://platform.openai.com/account/api-keys
-    OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", None)
+    # Google Gemini API // get from https://aistudio.google.com/apikey
+    GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", None)
+    # Kuki API for addai chatbot (optional; get key from kukiapi.xyz if required)
+    KUKI_API_KEY = os.environ.get("KUKI_API_KEY", None)
     # Spotify API for spotify.py // get from here :  https://developer.spotify.com/dashboard/login
     SPOTIFY_CLIENT_ID = os.environ.get("SPOTIFY_CLIENT_ID", None)
     SPOTIFY_CLIENT_SECRET = os.environ.get("SPOTIFY_CLIENT_SECRET", None)

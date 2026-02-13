@@ -117,7 +117,7 @@ async def safe_check_text(msg):  # sourcery no-metrics
             or (Config.OPEN_WEATHER_MAP_APPID and Config.OPEN_WEATHER_MAP_APPID in msg)
             or (Config.IBM_WATSON_CRED_URL and Config.IBM_WATSON_CRED_URL in msg)
             or (Config.OCR_SPACE_API_KEY and Config.OCR_SPACE_API_KEY in msg)
-            or (Config.OPENAI_API_KEY and Config.OPENAI_API_KEY in msg)
+            or (Config.GEMINI_API_KEY and Config.GEMINI_API_KEY in msg)
             or (Config.GENIUS_API_TOKEN and Config.GENIUS_API_TOKEN in msg)
             or (Config.REM_BG_API_KEY and Config.REM_BG_API_KEY in msg)
             or (Config.CURRENCY_API and Config.CURRENCY_API in msg)

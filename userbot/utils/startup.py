@@ -39,6 +39,9 @@ if ENV:
     VPS_NOLOAD = ["vps"]
 elif os.path.exists("config.py"):
     VPS_NOLOAD = ["heroku"]
+else:
+    # Docker/Render: no config.py, same as ENV (skip vps plugin)
+    VPS_NOLOAD = ["vps"]
 
 
 async def setup_bot():

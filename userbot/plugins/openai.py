@@ -12,11 +12,13 @@ import os
 
 from userbot import catub
 
+from ..Config import Config
 from ..core.managers import edit_delete, edit_or_reply
 from ..helpers.chatbot import (
     del_convo,
     generate_dalle_image,
     generate_edited_response,
+    generate_gemini_response,
     generate_gpt_response,
 )
 from ..helpers.utils import reply_id
@@ -24,49 +26,53 @@ from ..sql_helper.globals import addgvar, delgvar, gvarstatus
 
 plugin_category = "tools"
 
-
-MODELS = ["gpt-3.5-turbo", "gpt-3.5-turbo-0301"]
+# Gemini models (replaces OpenAI GPT)
+MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
 SIZE = ["256", "512", "1024"]
 
 
+def _gemini_available():
+    return bool(os.environ.get("GEMINI_API_KEY") or getattr(Config, "GEMINI_API_KEY", None))
+
+
 @catub.cat_cmd(
-    pattern="gpt(?:\s|$)([\s\S]*)",
-    command=("gpt", plugin_category),
+    pattern="gem(?:\s|$)([\s\S]*)",
+    command=("gem", plugin_category),
     info={
-        "header": "Generate GPT response with prompt",
-        "description": "Use {tr}gpt followed by a prompt to generate a GPT response using the provided text",
+        "header": "Generate Gemini response with prompt",
+        "description": "Use {tr}gem followed by a prompt to get a response from Google Gemini (gemini-2.0-flash).",
         "flags": {
             "e": "To generate edited response.",
-            "m": "To change model of ai.",
+            "m": "To change model.",
             "s": "To add system message.",
             "ds": "To delete system message.",
             "dc": "To delete context of given chat.",
         },
         "usage": [
-            "{tr}gpt <text/reply>",
-            "{tr}gpt -e <reply to a gpt message along with instruction>",
-            "{tr}gpt -m <model name>",
-            "{tr}gpt -s <system message>",
-            "{tr}gpt -ds",
-            "{tr}gpt -dc",
+            "{tr}gem <text/reply>",
+            "{tr}gem -e <reply to a message along with instruction>",
+            "{tr}gem -m <model name>",
+            "{tr}gem -s <system message>",
+            "{tr}gem -ds",
+            "{tr}gem -dc",
         ],
         "examples": [
-            "{tr}gpt write a paragraph on cat",
-            "{tr}gpt -e change the word count to 200 <reply to gpt message>",
-            "{tr}gpt -m gpt-3.5-turbo-0301",
-            "{tr}gpt -s Write every answer in an extremely angry tone , use swear words and insults wherever you see fit",
+            "{tr}gem write a paragraph on cat",
+            "{tr}gem -e change the word count to 200 <reply to message>",
+            "{tr}gem -m gemini-1.5-pro",
         ],
         "available models": MODELS,
     },
 )
-async def gpt_response_with_prompt(event):
-    "Generate a GPT response using the provided text using Openai Api"
+async def gem_response_with_prompt(event):
+    "Generate a response using Google Gemini (gemini-2.0-flash)."
+    if not _gemini_available():
+        return await edit_delete(event, "**GEMINI_API_KEY** is not set in environment.")
     text = event.pattern_match.group(1)
     reply = await event.get_reply_message()
     model_text = "**Available models:**\n\n"
     chat_id = event.chat_id
 
-    # Flag to generate edited message
     if "-e" in text:
         text = text.replace("-e", "").strip()
         if not reply or not reply.text or not text:
@@ -102,13 +108,99 @@ async def gpt_response_with_prompt(event):
             del_convo(chat_id)
             delgvar("SYSTEM_MESSAGE")
             return await edit_delete(event, "__System message cleared.__")
-        return await edit_delete(event, "__There's no system message set for GPT.__")
+        return await edit_delete(event, "__There's no system message set.__")
 
     elif "-dc" in text:
         response = del_convo(chat_id, True)
         return await edit_delete(event, response)
 
-    # Check if text given else take text from reply message
+    if not text and reply:
+        text = reply.text
+    if not text:
+        return await edit_delete(event, "**ಠ∀ಠ Gimmi text**")
+
+    catevent = await edit_or_reply(event, "__Generating answer...__")
+    gpt_response = generate_gemini_response(text, chat_id)
+    await edit_or_reply(catevent, gpt_response)
+
+
+@catub.cat_cmd(
+    pattern="gpt(?:\s|$)([\s\S]*)",
+    command=("gpt", plugin_category),
+    info={
+        "header": "Generate AI response (Gemini) with prompt",
+        "description": "Alias for {tr}gem. Use {tr}gpt followed by a prompt (uses Google Gemini).",
+        "flags": {
+            "e": "To generate edited response.",
+            "m": "To change model of ai.",
+            "s": "To add system message.",
+            "ds": "To delete system message.",
+            "dc": "To delete context of given chat.",
+        },
+        "usage": [
+            "{tr}gpt <text/reply>",
+            "{tr}gpt -e <reply to a message along with instruction>",
+            "{tr}gpt -m <model name>",
+            "{tr}gpt -s <system message>",
+            "{tr}gpt -ds",
+            "{tr}gpt -dc",
+        ],
+        "examples": [
+            "{tr}gpt write a paragraph on cat",
+        ],
+        "available models": MODELS,
+    },
+)
+async def gpt_response_with_prompt(event):
+    "Generate a response using Gemini (same as .gem)."
+    if not _gemini_available():
+        return await edit_delete(event, "**GEMINI_API_KEY** is not set in environment.")
+    text = event.pattern_match.group(1)
+    reply = await event.get_reply_message()
+    model_text = "**Available models:**\n\n"
+    chat_id = event.chat_id
+
+    if "-e" in text:
+        text = text.replace("-e", "").strip()
+        if not reply or not reply.text or not text:
+            return await edit_delete(
+                event,
+                "__Reply to message & pass the instruction message along with flag.__",
+            )
+        await edit_or_reply(event, "`Generating edited text...`")
+        response = generate_edited_response(reply.text, text)
+        return await edit_or_reply(event, response)
+
+    elif "-m" in text:
+        flag = text.replace("-m", "").strip()
+        if not flag or flag not in MODELS:
+            for index, name in enumerate(MODELS, 1):
+                model_text += f"**{index}.** `{name}`\n"
+            return await edit_delete(event, model_text, 50)
+        addgvar("CHAT_MODEL", flag)
+        return await edit_delete(event, f"__Chat model changed to : **{flag}**__")
+
+    elif "-s" in text:
+        flag = text.replace("-s", "").strip()
+        if not flag:
+            return await edit_delete(
+                event, "__Pass the system message along with flag.__"
+            )
+        addgvar("SYSTEM_MESSAGE", flag)
+        del_convo(chat_id)
+        return await edit_delete(event, f"__System message changed to :__\n\n`{flag}`")
+
+    elif "-ds" in text:
+        if SYSTEM_MESSAGE := gvarstatus("SYSTEM_MESSAGE") or None:
+            del_convo(chat_id)
+            delgvar("SYSTEM_MESSAGE")
+            return await edit_delete(event, "__System message cleared.__")
+        return await edit_delete(event, "__There's no system message set.__")
+
+    elif "-dc" in text:
+        response = del_convo(chat_id, True)
+        return await edit_delete(event, response)
+
     if not text and reply:
         text = reply.text
     if not text:
@@ -149,7 +241,7 @@ async def gpt_response_with_prompt(event):
     },
 )
 async def dalle_image_generation(event):
-    "Generate an Image using the provided text using Openai Api"
+    "DALL-E no longer available after Gemini migration; command shows info message."
     text = event.pattern_match.group(1)
     reply = await event.get_reply_message()
     image_text = "**Available Pixel Size:**\n\n"

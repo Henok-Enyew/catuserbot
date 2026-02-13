@@ -9,13 +9,14 @@
 
 import random
 
-import requests
 from telethon.utils import get_display_name
 
 from userbot import catub
 
+from ..core import pool
 from ..core.managers import edit_delete, edit_or_reply
-from ..helpers import ai_api, get_user_from_event
+from ..helpers import get_user_from_event
+from ..helpers.chatbot import generate_gpt_response
 from ..sql_helper.chatbot_sql import (
     addai,
     get_all_users,
@@ -212,12 +213,23 @@ async def list_chatbot(event):  # sourcery no-metrics
 
 @catub.cat_cmd(incoming=True, edited=False)
 async def ai_reply(event):
-    if is_added(event.chat_id, event.sender_id) and (event.message.text):
-        response = requests.get(
-            f"https://kukiapi.xyz/api/apikey={await ai_api(event)}/message={event.message.text}"
+    if not is_added(event.chat_id, event.sender_id) or not event.message.text:
+        return
+    # Use Gemini for addai (per-user conversation key so each user has their own thread)
+    conv_key = f"{event.chat_id}_{event.sender_id}"
+    try:
+        reply_text = await pool.run_in_thread(generate_gpt_response)(
+            event.message.text, conv_key
         )
-        if response.status_code == 200:
-            ai_msg = response.json()["reply"]
-            await event.reply(ai_msg)
+        await event.reply(reply_text)
+    except ValueError as e:
+        if "GEMINI_API_KEY" in str(e) or "not set" in str(e).lower():
+            await event.reply(
+                "**AddAI:** Set `GEMINI_API_KEY` in your env for AI replies."
+            )
         else:
             await event.reply(random.choice(tired_response))
+    except Exception as e:
+        await event.reply(
+            f"AI unavailable, try again later. `{e!s}`"
+        )
