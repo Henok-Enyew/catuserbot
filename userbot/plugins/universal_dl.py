@@ -10,6 +10,7 @@
 import os
 import shutil
 import subprocess
+import sys
 import time
 
 from urlextract import URLExtract
@@ -55,7 +56,7 @@ def _run_ytdlp(args, url, temp_dir, timeout=300):
     """Run yt-dlp CLI in subprocess (avoids Python import circular-import with ytdl plugin)."""
     outtmpl = os.path.join(temp_dir, "%(id)s.%(ext)s")
     cmd = [
-        "python", "-m", "yt_dlp",
+        sys.executable, "-m", "yt_dlp",
         "-o", outtmpl,
         "--no-check-certificate",
         "--no-warnings",
